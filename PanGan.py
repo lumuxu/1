@@ -212,21 +212,56 @@ class PanGan(object):
     # Generator (residual)
     # ------------------------------------------------------------------
     def PanSharpening_model_residual(self, pan_img, ms_img):
-        """Residual generator: fused = upsample(MS) + residual"""
+        """Residual generator: fused = upsample(MS) + residual (U-Net backbone)."""
         with tf.variable_scope('Pan_model', reuse=tf.AUTO_REUSE):
             ms_up = self._resize_like(ms_img, pan_img, method=tf.image.ResizeMethod.BICUBIC)
             x = tf.concat([ms_up, pan_img], axis=-1)
 
-            x = self._conv(x, 64, k=7, s=1, name='c1')
-            x = self.lrelu(x)
-            x = self._conv(x, 32, k=5, s=1, name='c2')
-            x = self.lrelu(x)
-            res = self._conv(x, self.num_spectrum, k=3, s=1, name='c3')
+            enc1 = self._conv_block(x, 64, name='enc1')
+            down1 = self._downsample(enc1, 128, name='down1')
+            enc2 = self._conv_block(down1, 128, name='enc2')
+            down2 = self._downsample(enc2, 256, name='down2')
+            enc3 = self._conv_block(down2, 256, name='enc3')
+            down3 = self._downsample(enc3, 512, name='down3')
+
+            bottleneck = self._conv_block(down3, 512, name='bottleneck')
+
+            up3 = self._up_block(bottleneck, enc3, 256, name='up3')
+            up2 = self._up_block(up3, enc2, 128, name='up2')
+            up1 = self._up_block(up2, enc1, 64, name='up1')
+
+            res = self._conv(up1, self.num_spectrum, k=3, s=1, name='out')
 
             res = tf.tanh(res) * self.residual_scale
             fused = ms_up + res
             fused = tf.clip_by_value(fused, -1.0, 1.0)
             return fused
+
+    def _conv_block(self, x, out_ch, name='conv_block'):
+        with tf.variable_scope(name):
+            x = self._conv(x, out_ch, k=3, s=1, name='c1')
+            x = self.lrelu(x)
+            x = self._conv(x, out_ch, k=3, s=1, name='c2')
+            x = self.lrelu(x)
+            return x
+
+    def _downsample(self, x, out_ch, name='downsample'):
+        with tf.variable_scope(name):
+            x = self._conv(x, out_ch, k=3, s=2, name='down')
+            x = self.lrelu(x)
+            return x
+
+    def _up_block(self, x, skip, out_ch, name='up_block'):
+        with tf.variable_scope(name):
+            x = self._resize_like(x, skip, method=tf.image.ResizeMethod.BILINEAR)
+            x = self._conv(x, out_ch, k=3, s=1, name='up')
+            x = self.lrelu(x)
+            x = tf.concat([x, skip], axis=-1)
+            x = self._conv(x, out_ch, k=3, s=1, name='c1')
+            x = self.lrelu(x)
+            x = self._conv(x, out_ch, k=3, s=1, name='c2')
+            x = self.lrelu(x)
+            return x
 
     # ------------------------------------------------------------------
     # Discriminators
