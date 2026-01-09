@@ -217,6 +217,7 @@ class PanGan(object):
             ms_up = self._resize_like(ms_img, pan_img, method=tf.image.ResizeMethod.BICUBIC)
             x = tf.concat([ms_up, pan_img], axis=-1)
 
+            # Encoder: progressively downsample while increasing channels.
             enc1 = self._conv_block(x, 64, name='enc1')
             down1 = self._downsample(enc1, 128, name='down1')
             enc2 = self._conv_block(down1, 128, name='enc2')
@@ -224,8 +225,10 @@ class PanGan(object):
             enc3 = self._conv_block(down2, 256, name='enc3')
             down3 = self._downsample(enc3, 512, name='down3')
 
+            # Bottleneck: deepest features.
             bottleneck = self._conv_block(down3, 512, name='bottleneck')
 
+            # Decoder: upsample and fuse with skip connections.
             up3 = self._up_block(bottleneck, enc3, 256, name='up3')
             up2 = self._up_block(up3, enc2, 128, name='up2')
             up1 = self._up_block(up2, enc1, 64, name='up1')
@@ -239,6 +242,7 @@ class PanGan(object):
 
     def _conv_block(self, x, out_ch, name='conv_block'):
         with tf.variable_scope(name):
+            # Two 3x3 convs for local feature extraction.
             x = self._conv(x, out_ch, k=3, s=1, name='c1')
             x = self.lrelu(x)
             x = self._conv(x, out_ch, k=3, s=1, name='c2')
@@ -247,16 +251,19 @@ class PanGan(object):
 
     def _downsample(self, x, out_ch, name='downsample'):
         with tf.variable_scope(name):
+            # Strided conv to reduce spatial size by 2.
             x = self._conv(x, out_ch, k=3, s=2, name='down')
             x = self.lrelu(x)
             return x
 
     def _up_block(self, x, skip, out_ch, name='up_block'):
         with tf.variable_scope(name):
+            # Upsample then fuse with corresponding encoder feature.
             x = self._resize_like(x, skip, method=tf.image.ResizeMethod.BILINEAR)
             x = self._conv(x, out_ch, k=3, s=1, name='up')
             x = self.lrelu(x)
             x = tf.concat([x, skip], axis=-1)
+            # Refinement after skip concatenation.
             x = self._conv(x, out_ch, k=3, s=1, name='c1')
             x = self.lrelu(x)
             x = self._conv(x, out_ch, k=3, s=1, name='c2')
