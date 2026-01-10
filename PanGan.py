@@ -212,21 +212,63 @@ class PanGan(object):
     # Generator (residual)
     # ------------------------------------------------------------------
     def PanSharpening_model_residual(self, pan_img, ms_img):
-        """Residual generator: fused = upsample(MS) + residual"""
-        with tf.variable_scope('Pan_model', reuse=tf.AUTO_REUSE):
-            ms_up = self._resize_like(ms_img, pan_img, method=tf.image.ResizeMethod.BICUBIC)
-            x = tf.concat([ms_up, pan_img], axis=-1)
+        """Residual generator: fused = upsample(MS) + residual (U-Net backbone)."""
+        with tf.variable_scope('Pan_model', reuse=tf.AUTO_REUSE):  # 固定在 Pan_model 变量域，便于训练/加载权重
+            ms_up = self._resize_like(ms_img, pan_img, method=tf.image.ResizeMethod.BICUBIC)  # 将低分辨率 MS 上采样到 PAN 分辨率
+            x = tf.concat([ms_up, pan_img], axis=-1)  # 沿通道拼接 MS 与 PAN，形成融合输入
 
-            x = self._conv(x, 64, k=7, s=1, name='c1')
-            x = self.lrelu(x)
-            x = self._conv(x, 32, k=5, s=1, name='c2')
-            x = self.lrelu(x)
-            res = self._conv(x, self.num_spectrum, k=3, s=1, name='c3')
+            # 编码器：逐步下采样，扩大感受野并提升通道数以提取高层特征。
+            enc1 = self._conv_block(x, 64, name='enc1')  # 第 1 层编码特征（全分辨率）
+            down1 = self._downsample(enc1, 128, name='down1')  # 下采样到 1/2 分辨率
+            enc2 = self._conv_block(down1, 128, name='enc2')  # 第 2 层编码特征（1/2 分辨率）
+            down2 = self._downsample(enc2, 256, name='down2')  # 下采样到 1/4 分辨率
+            enc3 = self._conv_block(down2, 256, name='enc3')  # 第 3 层编码特征（1/4 分辨率）
+            down3 = self._downsample(enc3, 512, name='down3')  # 下采样到 1/8 分辨率
 
-            res = tf.tanh(res) * self.residual_scale
-            fused = ms_up + res
-            fused = tf.clip_by_value(fused, -1.0, 1.0)
-            return fused
+            # 瓶颈：最深层特征，聚合全局上下文。
+            bottleneck = self._conv_block(down3, 512, name='bottleneck')  # 1/8 分辨率的深层表征
+
+            # 解码器：逐层上采样并与编码器特征跳连融合，恢复空间细节。
+            up3 = self._up_block(bottleneck, enc3, 256, name='up3')  # 上采样到 1/4 并融合 enc3
+            up2 = self._up_block(up3, enc2, 128, name='up2')  # 上采样到 1/2 并融合 enc2
+            up1 = self._up_block(up2, enc1, 64, name='up1')  # 上采样回全分辨率并融合 enc1
+
+            res = self._conv(up1, self.num_spectrum, k=3, s=1, name='out')  # 输出残差（与 MS 通道数一致）
+
+            res = tf.tanh(res) * self.residual_scale  # 将残差限制到 [-residual_scale, residual_scale]
+            fused = ms_up + res  # 残差加回 MS 上采样结果，得到最终融合图
+            fused = tf.clip_by_value(fused, -1.0, 1.0)  # 限制输出范围到 [-1, 1]
+            return fused  # 返回融合结果
+
+    def _conv_block(self, x, out_ch, name='conv_block'):
+        with tf.variable_scope(name):  # 每个块使用独立变量域，便于可视化与复用
+            # 两次 3x3 卷积用于局部特征提取与非线性表达增强。
+            x = self._conv(x, out_ch, k=3, s=1, name='c1')  # 第 1 次卷积
+            x = self.lrelu(x)  # LeakyReLU 激活，缓解梯度消失
+            x = self._conv(x, out_ch, k=3, s=1, name='c2')  # 第 2 次卷积
+            x = self.lrelu(x)  # 再次激活
+            return x  # 返回卷积块输出
+
+    def _downsample(self, x, out_ch, name='downsample'):
+        with tf.variable_scope(name):  # 下采样模块变量域
+            # 使用步幅为 2 的卷积将空间尺寸减半。
+            x = self._conv(x, out_ch, k=3, s=2, name='down')  # 下采样卷积
+            x = self.lrelu(x)  # 激活
+            return x  # 返回下采样结果
+
+    def _up_block(self, x, skip, out_ch, name='up_block'):
+        with tf.variable_scope(name):  # 上采样模块变量域
+            # 先上采样，再与对应编码器特征进行跳连融合。
+            x = self._resize_like(x, skip, method=tf.image.ResizeMethod.BILINEAR)  # 双线性插值到跳连特征大小
+            x = self._conv(x, out_ch, k=3, s=1, name='up')  # 上采样后卷积调整通道
+            x = self.lrelu(x)  # 激活
+            x = tf.concat([x, skip], axis=-1)  # 与编码器同尺度特征拼接
+            # 跳连拼接后再进行特征融合与细化。
+            x = self._conv(x, out_ch, k=3, s=1, name='c1')  # 融合卷积 1
+            x = self.lrelu(x)  # 激活
+            x = self._conv(x, out_ch, k=3, s=1, name='c2')  # 融合卷积 2
+            x = self.lrelu(x)  # 激活
+            return x  # 返回上采样块输出
 
     # ------------------------------------------------------------------
     # Discriminators
