@@ -34,6 +34,20 @@ class FLAGES(object):
     decay_rate = 0.99
     decay_step = 10000
 
+    # Optional training knobs for PanGan (train.py will pick these up if set).
+    d_lr = None
+    lambda_hp = 5.0
+    lambda_spec = 1.0
+    lambda_adv_spatial = 1.0
+    lambda_adv_spectrum = 1.0
+    adv_warmup_iters = 2000
+    adv_ramp_iters = 8000
+    adv_weight_max = 1.0
+    residual_scale = 0.1
+    beta1 = 0.5
+    beta2 = 0.999
+    grad_clip_norm = 5.0
+
     # Root folder containing MS/ and Pan/ subfolders with TIFFs.
     img_path = './data/source_data'
 
@@ -53,4 +67,3 @@ class FLAGES(object):
     loss_plot_max_points = 20000   # 画图时最多取多少点（默认 20000，自动下采样）
     best_k = 5                     # 输出 TopK（默认 5）
     loss_log_flush_every = 200     # CSV 每写多少行 flush 一次（默认 200）
-
