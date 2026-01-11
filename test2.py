@@ -45,19 +45,36 @@ def _ensure_hwc(arr: np.ndarray) -> np.ndarray:
     return arr
 
 
-def _normalize_to_minus1_1(img: np.ndarray) -> np.ndarray:
-    if np.issubdtype(img.dtype, np.integer):
-        info = np.iinfo(img.dtype)
-        maxv = float(info.max)
-        mid = maxv / 2.0
-        return (img.astype(np.float32) - mid) / mid
-
+def _robust_percentile_normalize_to_minus1_1(img: np.ndarray, p_low=0.2, p_high=99.8) -> np.ndarray:
+    """Match training normalization: per-channel percentile scaling to [-1, 1]."""
     img_f = img.astype(np.float32)
-    vmin = float(np.nanmin(img_f))
-    vmax = float(np.nanmax(img_f))
-    if vmin >= 0.0 and vmax <= 1.0:
-        return img_f * 2.0 - 1.0
-    return img_f
+
+    # special case: [0,1] floats
+    if np.issubdtype(img.dtype, np.floating):
+        vmin = float(np.nanmin(img_f))
+        vmax = float(np.nanmax(img_f))
+        if vmin >= 0.0 and vmax <= 1.0:
+            return img_f * 2.0 - 1.0
+
+    if img_f.ndim == 2:
+        img_f = img_f[:, :, None]
+
+    out = np.empty_like(img_f, dtype=np.float32)
+    for c in range(img_f.shape[2]):
+        ch = img_f[:, :, c]
+        lo = np.nanpercentile(ch, p_low)
+        hi = np.nanpercentile(ch, p_high)
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo + 1e-6:
+            lo = float(np.nanmin(ch))
+            hi = float(np.nanmax(ch))
+            if hi <= lo + 1e-6:
+                out[:, :, c] = 0.0
+                continue
+        ch_n = (ch - lo) / (hi - lo)
+        ch_n = np.clip(ch_n, 0.0, 1.0)
+        out[:, :, c] = ch_n * 2.0 - 1.0
+
+    return out
 
 
 def _denormalize_from_minus1_1(img: np.ndarray, out_dtype: np.dtype) -> np.ndarray:
@@ -85,8 +102,8 @@ def read_pair(pan_folder: str, ms_folder: str, fname: str, ratio: int):
 
     ms_dtype = ms_raw.dtype
 
-    pan = _normalize_to_minus1_1(pan_raw)
-    ms = _normalize_to_minus1_1(ms_raw)
+    pan = _robust_percentile_normalize_to_minus1_1(pan_raw)
+    ms = _robust_percentile_normalize_to_minus1_1(ms_raw)
 
     # If MS is still lower-res, upsample to PAN size for inference.
     if ms.shape[0] != pan.shape[0] or ms.shape[1] != pan.shape[1]:
