@@ -34,6 +34,11 @@ tf.app.flags.DEFINE_string(
     'auto',
     'Input layout for TIFF arrays: auto, hwc, or chw.',
 )
+tf.app.flags.DEFINE_string(
+    'output_layout',
+    'hwc',
+    'Output layout before saving: auto, hwc, or chw.',
+)
 
 # Save dtype
 # - If True: save output as uint16 when input MS is uint16; otherwise uint8
@@ -97,6 +102,25 @@ def _robust_percentile_normalize_to_minus1_1(img: np.ndarray, p_low=0.2, p_high=
         out[:, :, c] = ch_n * 2.0 - 1.0
 
     return out
+
+
+def _ensure_output_hwc(arr: np.ndarray) -> np.ndarray:
+    layout = FLAGS.output_layout.lower()
+    if layout == 'hwc':
+        return arr
+    if layout == 'chw':
+        if arr.ndim != 3:
+            raise ValueError(f"Unsupported output shape: {arr.shape}")
+        return np.transpose(arr, (1, 2, 0))
+    if layout != 'auto':
+        raise ValueError('output_layout must be one of: auto, hwc, chw')
+
+    if arr.ndim != 3:
+        return arr
+    c_first, h, w = arr.shape
+    if c_first <= 32 and c_first < h and c_first < w:
+        return np.transpose(arr, (1, 2, 0))
+    return arr
 
 
 def _denormalize_from_minus1_1(img: np.ndarray, out_dtype: np.dtype) -> np.ndarray:
@@ -199,7 +223,7 @@ def main(_):
                 feed_dict={model.pan_img: pan, model.ms_img: ms},
             )
 
-            out = out.squeeze()  # (H,W,C)
+            out = _ensure_output_hwc(out.squeeze())  # (H,W,C)
 
             # Decide output dtype
             if FLAGS.save_like_input_dtype:
