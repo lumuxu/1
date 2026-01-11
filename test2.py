@@ -246,7 +246,13 @@ def main(_):
 
             save_name = os.path.splitext(fname)[0] + '.tif'
             save_path = os.path.join(FLAGS.result_path, save_name)
-            tifffile.imwrite(save_path, out_int)
+            tifffile.imwrite(
+                save_path,
+                out_int,
+                metadata={'axes': 'YXC'},
+                photometric='minisblack',
+                planarconfig='CONTIG',
+            )
 
             print(
                 f"{fname} done. time={time.time() - start:.3f}s | "
