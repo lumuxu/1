@@ -24,6 +24,11 @@ tf.app.flags.DEFINE_string('result_path', './result', 'Output folder')
 # Folder names under test_path (keep same as original repo by default)
 tf.app.flags.DEFINE_string('ms_dir', 'lrms', 'Subfolder for MS images (TIFF)')
 tf.app.flags.DEFINE_string('pan_dir', 'pan', 'Subfolder for PAN images (TIFF)')
+tf.app.flags.DEFINE_string(
+    'pan_name_replace',
+    '_mul,_pan',
+    'Map MS filename to PAN filename via "from,to" replacement. Empty to keep same name.',
+)
 
 # Save dtype
 # - If True: save output as uint16 when input MS is uint16; otherwise uint8
@@ -88,9 +93,20 @@ def _denormalize_from_minus1_1(img: np.ndarray, out_dtype: np.dtype) -> np.ndarr
     return img.astype(out_dtype)
 
 
+def _map_pan_name(ms_name: str) -> str:
+    if not FLAGS.pan_name_replace:
+        return ms_name
+    parts = [p.strip() for p in FLAGS.pan_name_replace.split(',', 1)]
+    if len(parts) != 2:
+        raise ValueError('pan_name_replace must be "from,to" or empty.')
+    src, dst = parts
+    return ms_name.replace(src, dst, 1) if src else ms_name
+
+
 def read_pair(pan_folder: str, ms_folder: str, fname: str, ratio: int):
     """Read a PAN/MS pair, normalize to [-1,1], and return NCHW ready for model."""
-    pan_path = os.path.join(pan_folder, fname)
+    pan_name = _map_pan_name(fname)
+    pan_path = os.path.join(pan_folder, pan_name)
     ms_path = os.path.join(ms_folder, fname)
 
     pan_raw = _ensure_hwc(tifffile.imread(pan_path))
@@ -148,10 +164,11 @@ def main(_):
 
         ms_files = {f for f in os.listdir(ms_folder) if f.lower().endswith(('.tif', '.tiff'))}
         pan_files = {f for f in os.listdir(pan_folder) if f.lower().endswith(('.tif', '.tiff'))}
-        fnames = sorted(ms_files & pan_files)
+        fnames = sorted([f for f in ms_files if _map_pan_name(f) in pan_files])
         if len(fnames) == 0:
             raise FileNotFoundError(
-                f"No matching .tif/.tiff filenames between {ms_folder} and {pan_folder}"
+                f"No matching .tif/.tiff filenames between {ms_folder} and {pan_folder} "
+                f"using pan_name_replace={FLAGS.pan_name_replace!r}"
             )
 
         for fname in fnames:
