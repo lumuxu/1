@@ -146,9 +146,13 @@ def main(_):
         ms_folder = os.path.join(FLAGS.test_path, FLAGS.ms_dir)
         pan_folder = os.path.join(FLAGS.test_path, FLAGS.pan_dir)
 
-        fnames = sorted([f for f in os.listdir(ms_folder) if f.lower().endswith(('.tif', '.tiff'))])
+        ms_files = {f for f in os.listdir(ms_folder) if f.lower().endswith(('.tif', '.tiff'))}
+        pan_files = {f for f in os.listdir(pan_folder) if f.lower().endswith(('.tif', '.tiff'))}
+        fnames = sorted(ms_files & pan_files)
         if len(fnames) == 0:
-            raise FileNotFoundError(f"No .tif/.tiff files found in {ms_folder}")
+            raise FileNotFoundError(
+                f"No matching .tif/.tiff filenames between {ms_folder} and {pan_folder}"
+            )
 
         for fname in fnames:
             print(fname)
