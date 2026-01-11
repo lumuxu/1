@@ -29,6 +29,11 @@ tf.app.flags.DEFINE_string(
     '_mul,_pan',
     'Map MS filename to PAN filename via "from,to" replacement. Empty to keep same name.',
 )
+tf.app.flags.DEFINE_string(
+    'input_layout',
+    'auto',
+    'Input layout for TIFF arrays: auto, hwc, or chw.',
+)
 
 # Save dtype
 # - If True: save output as uint16 when input MS is uint16; otherwise uint8
@@ -39,6 +44,18 @@ tf.app.flags.DEFINE_boolean('save_like_input_dtype', True, 'Save output dtype sa
 
 def _ensure_hwc(arr: np.ndarray) -> np.ndarray:
     """Ensure TIFF array is HWC."""
+    layout = FLAGS.input_layout.lower()
+    if layout == 'hwc':
+        return arr
+    if layout == 'chw':
+        if arr.ndim == 2:
+            return arr[:, :, None]
+        if arr.ndim != 3:
+            raise ValueError(f"Unsupported TIFF shape: {arr.shape}")
+        return np.transpose(arr, (1, 2, 0))
+    if layout != 'auto':
+        raise ValueError('input_layout must be one of: auto, hwc, chw')
+
     if arr.ndim == 2:
         return arr[:, :, None]
     if arr.ndim != 3:
