@@ -107,6 +107,13 @@ def _robust_percentile_normalize_to_minus1_1(img: np.ndarray, p_low=0.2, p_high=
 def _ensure_output_hwc(arr: np.ndarray) -> np.ndarray:
     layout = FLAGS.output_layout.lower()
     if layout == 'hwc':
+        if arr.ndim == 3:
+            c = int(getattr(FLAGS, 'num_spectrum', 0))
+            if c > 0:
+                if arr.shape[0] == c and arr.shape[2] != c:
+                    return np.transpose(arr, (1, 2, 0))
+                if arr.shape[1] == c and arr.shape[2] != c:
+                    return np.transpose(arr, (0, 2, 1))
         return arr
     if layout == 'chw':
         if arr.ndim != 3:
