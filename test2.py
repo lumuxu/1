@@ -135,7 +135,9 @@ def main(_):
         is_training=False,
     )
 
-    saver = tf.train.Saver()
+    saver = tf.train.Saver(
+        var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, 'Pan_model')
+    )
 
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
