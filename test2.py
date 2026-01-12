@@ -69,6 +69,10 @@ def _ensure_hwc(arr: np.ndarray) -> np.ndarray:
     c_first, h, w = arr.shape
     if c_first <= 32 and c_first < h and c_first < w:
         return np.transpose(arr, (1, 2, 0))
+    # Some TIFFs store as (H, C, W)
+    h_first, c_mid, w_last = arr.shape
+    if c_mid <= 32 and c_mid < h_first and c_mid < w_last:
+        return np.transpose(arr, (0, 2, 1))
     return arr
 
 
@@ -242,7 +246,13 @@ def main(_):
 
             save_name = os.path.splitext(fname)[0] + '.tif'
             save_path = os.path.join(FLAGS.result_path, save_name)
-            tifffile.imwrite(save_path, out_int)
+            tifffile.imwrite(
+                save_path,
+                out_int,
+                metadata={'axes': 'YXC'},
+                photometric='minisblack',
+                planarconfig='CONTIG',
+            )
 
             print(
                 f"{fname} done. time={time.time() - start:.3f}s | "

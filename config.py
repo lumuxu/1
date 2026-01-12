@@ -38,11 +38,13 @@ class FLAGES(object):
     d_lr = None
     lambda_hp = 5.0
     lambda_spec = 1.0
+    lambda_sam = 0.05
+    lambda_ssim = 0.2
     lambda_adv_spatial = 1.0
     lambda_adv_spectrum = 1.0
-    adv_warmup_iters = 2000
-    adv_ramp_iters = 8000
-    adv_weight_max = 1.0
+    adv_warmup_iters = 5000
+    adv_ramp_iters = 15000
+    adv_weight_max = 0.5
     residual_scale = 0.1
     beta1 = 0.5
     beta2 = 0.999

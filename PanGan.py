@@ -35,12 +35,14 @@ class PanGan(object):
         # losses
         lambda_hp=5.0,
         lambda_spec=1.0,
+        lambda_sam=0.05,
+        lambda_ssim=0.2,
         lambda_adv_spatial=1.0,
         lambda_adv_spectrum=1.0,
         # adversarial schedule
-        adv_warmup_iters=2000,
-        adv_ramp_iters=8000,
-        adv_weight_max=1.0,
+        adv_warmup_iters=5000,
+        adv_ramp_iters=15000,
+        adv_weight_max=0.5,
         # residual scale
         residual_scale=0.1,
         # optim
@@ -62,6 +64,8 @@ class PanGan(object):
 
         self.lambda_hp = float(lambda_hp)
         self.lambda_spec = float(lambda_spec)
+        self.lambda_sam = float(lambda_sam)
+        self.lambda_ssim = float(lambda_ssim)
         self.lambda_adv_spatial = float(lambda_adv_spatial)
         self.lambda_adv_spectrum = float(lambda_adv_spectrum)
 
@@ -113,9 +117,20 @@ class PanGan(object):
             self.g_spectrum_loss = tf.reduce_mean(tf.abs(self.PanSharpening_img - self.ms_img_))
             tf.summary.scalar('g_spectrum_loss', self.g_spectrum_loss)
 
+            self.g_sam_loss = self._spectral_angle_loss(self.PanSharpening_img, self.ms_img_)
+            tf.summary.scalar('g_sam_loss', self.g_sam_loss)
+
+            self.g_ssim_loss = self._ssim_loss(self.PanSharpening_img_pan, self.pan_img)
+            tf.summary.scalar('g_ssim_loss', self.g_ssim_loss)
+
         if not is_training:
             # for test2.py
-            self.g_loss = self.lambda_hp * self.g_spatial_loss + self.lambda_spec * self.g_spectrum_loss
+            self.g_loss = (
+                self.lambda_hp * self.g_spatial_loss
+                + self.lambda_spec * self.g_spectrum_loss
+                + self.lambda_sam * self.g_sam_loss
+                + self.lambda_ssim * self.g_ssim_loss
+            )
             return
 
         # ------------------------------------------------------------------
@@ -148,7 +163,12 @@ class PanGan(object):
 
         # total g loss
         with tf.name_scope('g_loss'):
-            recon = self.lambda_hp * self.g_spatial_loss + self.lambda_spec * self.g_spectrum_loss
+            recon = (
+                self.lambda_hp * self.g_spatial_loss
+                + self.lambda_spec * self.g_spectrum_loss
+                + self.lambda_sam * self.g_sam_loss
+                + self.lambda_ssim * self.g_ssim_loss
+            )
             adv = (self.lambda_adv_spatial * self.spatial_loss_ad + self.lambda_adv_spectrum * self.spectrum_loss_ad)
             self.g_loss = recon + self.adv_weight * adv
             tf.summary.scalar('g_loss', self.g_loss)
@@ -348,6 +368,24 @@ class PanGan(object):
         # per-sample standardization over H,W
         mean, var = tf.nn.moments(x, axes=[1, 2], keep_dims=True)
         return (x - mean) / tf.sqrt(var + eps)
+
+    @staticmethod
+    def _spectral_angle_loss(pred, target, eps=1e-8):
+        # pred/target: [B,H,W,C]
+        pred_n = tf.nn.l2_normalize(pred, axis=-1, epsilon=eps)
+        target_n = tf.nn.l2_normalize(target, axis=-1, epsilon=eps)
+        cos_sim = tf.reduce_sum(pred_n * target_n, axis=-1)
+        cos_sim = tf.clip_by_value(cos_sim, -1.0 + eps, 1.0 - eps)
+        sam = tf.acos(cos_sim)
+        return tf.reduce_mean(sam)
+
+    @staticmethod
+    def _ssim_loss(pred, target):
+        # pred/target: [B,H,W,1] in [-1,1] -> rescale to [0,1]
+        pred_01 = (pred + 1.0) * 0.5
+        target_01 = (target + 1.0) * 0.5
+        ssim_map = tf.image.ssim(pred_01, target_01, max_val=1.0)
+        return tf.reduce_mean(1.0 - ssim_map)
 
     def _adv_weight_schedule(self, step):
         step_f = tf.cast(step, tf.float32)
