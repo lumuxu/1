@@ -61,7 +61,7 @@ class FLAGES(object):
 
     is_pretrained = False
 
-    iters = 5000
+    iters = 3000
     model_save_iters = 1000
     valid_iters = 10
     
