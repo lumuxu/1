@@ -36,7 +36,7 @@ class FLAGES(object):
 
     # Optional training knobs for PanGan (train.py will pick these up if set).
     d_lr = None
-    lambda_hp = 5.0
+    lambda_hp = 1.0
     lambda_spec = 1.0
     lambda_sam = 0.05
     lambda_ssim = 0.2
