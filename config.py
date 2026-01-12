@@ -42,8 +42,8 @@ class FLAGES(object):
     lambda_ssim = 0.2
     lambda_adv_spatial = 1.0
     lambda_adv_spectrum = 1.0
-    adv_warmup_iters = 5000
-    adv_ramp_iters = 15000
+    adv_warmup_iters = 500
+    adv_ramp_iters = 2000
     adv_weight_max = 0.5
     residual_scale = 0.1
     beta1 = 0.5
