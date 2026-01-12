@@ -19,12 +19,31 @@ from PanGan import PanGan
 from DataSet import DataSet
 from config import FLAGES
 
-def print_current_training_stats(error_pan_model, error_ms_model, error_g_model, global_step, learning_rate, time_elapsed):
+def print_current_training_stats(
+    error_pan_model,
+    error_ms_model,
+    error_g_model,
+    global_step,
+    learning_rate,
+    time_elapsed,
+    g_spatial_loss=None,
+    g_spectrum_loss=None,
+    g_sam_loss=None,
+    g_ssim_loss=None,
+):
     stats = 'Step: {}/{} ----- Cur_lr: {:1.7f} ----- Time: {:>2.2f} sec.'.format(global_step, FLAGES.iters,
                                                                                  learning_rate, time_elapsed)
     losses =  ' | spatial loss: {}'.format(error_pan_model)
     losses += ' | spectrual loss: {}'.format(error_ms_model)
     losses += ' | generator loss: {}'.format(error_g_model)
+    if g_spatial_loss is not None:
+        losses += ' | g_spatial: {}'.format(g_spatial_loss)
+    if g_spectrum_loss is not None:
+        losses += ' | g_spectrum: {}'.format(g_spectrum_loss)
+    if g_sam_loss is not None:
+        losses += ' | g_sam: {}'.format(g_sam_loss)
+    if g_ssim_loss is not None:
+        losses += ' | g_ssim: {}'.format(g_ssim_loss)
     print(stats)
     print(losses + '\n')
     
@@ -183,7 +202,20 @@ def main(argv):
         csv_rows_written = 0
         csv_f = open(loss_csv_path, 'w', newline='', encoding='utf-8')
         csv_w = csv.writer(csv_f)
-        csv_w.writerow(['step', 'spatial_loss', 'spectrum_loss', 'g_loss', 'learning_rate', 'time_sec'])
+        csv_w.writerow(
+            [
+                'step',
+                'spatial_loss',
+                'spectrum_loss',
+                'g_loss',
+                'g_spatial_loss',
+                'g_spectrum_loss',
+                'g_sam_loss',
+                'g_ssim_loss',
+                'learning_rate',
+                'time_sec',
+            ]
+        )
 
         def _finalize_reports():
             """Write loss curve + best models even if training is interrupted."""
@@ -247,8 +279,28 @@ def main(argv):
                         feed_dict={model.pan_img: pan_batch, model.ms_img: ms_batch},
                     )
 
-                _, error_g_model, global_step, summary, learning_rate = sess.run(
-                    [model.train_Pan_model, model.g_loss, model.global_step, merge_summary, model.learning_rate],
+                (
+                    _,
+                    error_g_model,
+                    g_spatial_loss,
+                    g_spectrum_loss,
+                    g_sam_loss,
+                    g_ssim_loss,
+                    global_step,
+                    summary,
+                    learning_rate,
+                ) = sess.run(
+                    [
+                        model.train_Pan_model,
+                        model.g_loss,
+                        model.g_spatial_loss,
+                        model.g_spectrum_loss,
+                        model.g_sam_loss,
+                        model.g_ssim_loss,
+                        model.global_step,
+                        merge_summary,
+                        model.learning_rate,
+                    ],
                     feed_dict={model.pan_img: pan_batch, model.ms_img: ms_batch},
                 )
 
@@ -265,6 +317,10 @@ def main(argv):
                 spatial_f = _to_float(error_pan_model)
                 spectrum_f = _to_float(error_ms_model)
                 lr_f = _to_float(learning_rate)
+                g_spatial_f = _to_float(g_spatial_loss)
+                g_spectrum_f = _to_float(g_spectrum_loss)
+                g_sam_f = _to_float(g_sam_loss)
+                g_ssim_f = _to_float(g_ssim_loss)
                 time_sec = _to_float(time.time() - t1)
 
                 # Use checkpoint step convention (same as saver.save(..., global_step=global_step+1)).
@@ -273,7 +329,18 @@ def main(argv):
                 except Exception:
                     step = int(training_itr) + 1
 
-                print_current_training_stats(spatial_f, spectrum_f, g_loss_f, step, lr_f, time_sec)
+                print_current_training_stats(
+                    spatial_f,
+                    spectrum_f,
+                    g_loss_f,
+                    step,
+                    lr_f,
+                    time_sec,
+                    g_spatial_loss=g_spatial_f,
+                    g_spectrum_loss=g_spectrum_f,
+                    g_sam_loss=g_sam_f,
+                    g_ssim_loss=g_ssim_f,
+                )
                 train_writer.add_summary(summary, step)
 
                 # Record loss history
@@ -283,7 +350,20 @@ def main(argv):
                     spectrum_hist.append(spectrum_f)
                     g_hist.append(g_loss_f)
 
-                    csv_w.writerow([step, spatial_f, spectrum_f, g_loss_f, lr_f, time_sec])
+                    csv_w.writerow(
+                        [
+                            step,
+                            spatial_f,
+                            spectrum_f,
+                            g_loss_f,
+                            g_spatial_f,
+                            g_spectrum_f,
+                            g_sam_f,
+                            g_ssim_f,
+                            lr_f,
+                            time_sec,
+                        ]
+                    )
                     csv_rows_written += 1
                     if flush_every > 0 and (csv_rows_written % flush_every == 0):
                         csv_f.flush()
@@ -327,5 +407,3 @@ def main(argv):
 
 if __name__ == '__main__':
     tf.app.run()
-
-

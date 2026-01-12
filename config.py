@@ -36,15 +36,15 @@ class FLAGES(object):
 
     # Optional training knobs for PanGan (train.py will pick these up if set).
     d_lr = None
-    lambda_hp = 5.0
-    lambda_spec = 1.0
-    lambda_sam = 0.05
-    lambda_ssim = 0.2
+    lambda_hp = 0.5
+    lambda_spec = 0.5
+    lambda_sam = 0.02
+    lambda_ssim = 0.1
     lambda_adv_spatial = 1.0
     lambda_adv_spectrum = 1.0
-    adv_warmup_iters = 5000
-    adv_ramp_iters = 15000
-    adv_weight_max = 0.5
+    adv_warmup_iters = 500
+    adv_ramp_iters = 2000
+    adv_weight_max = 0.2
     residual_scale = 0.1
     beta1 = 0.5
     beta2 = 0.999
@@ -61,7 +61,7 @@ class FLAGES(object):
 
     is_pretrained = False
 
-    iters = 5000
+    iters = 3000
     model_save_iters = 1000
     valid_iters = 10
     
