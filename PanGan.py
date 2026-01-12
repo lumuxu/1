@@ -35,14 +35,14 @@ class PanGan(object):
         # losses
         lambda_hp=5.0,
         lambda_spec=1.0,
-        lambda_sam=0.2,
-        lambda_ssim=1.0,
+        lambda_sam=0.05,
+        lambda_ssim=0.2,
         lambda_adv_spatial=1.0,
         lambda_adv_spectrum=1.0,
         # adversarial schedule
-        adv_warmup_iters=2000,
-        adv_ramp_iters=8000,
-        adv_weight_max=1.0,
+        adv_warmup_iters=5000,
+        adv_ramp_iters=15000,
+        adv_weight_max=0.5,
         # residual scale
         residual_scale=0.1,
         # optim
