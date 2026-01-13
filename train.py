@@ -108,8 +108,29 @@ def _rank_best_models(
     return filtered[:k]
 
 def main(argv):
-    model=PanGan(FLAGES.pan_size, FLAGES.ms_size, FLAGES.batch_size, FLAGES.num_spectrum, FLAGES.ratio,
-                 FLAGES.lr,FLAGES.decay_rate,FLAGES.decay_step,is_training=True)
+    model = PanGan(
+        pan_size=FLAGES.pan_size,
+        ms_size=FLAGES.ms_size,
+        batch_size=FLAGES.batch_size,
+        num_spectrum=FLAGES.num_spectrum,
+        ratio=FLAGES.ratio,
+        init_lr=FLAGES.lr,
+        lr_decay_rate=FLAGES.decay_rate,
+        lr_decay_step=FLAGES.decay_step,
+        is_training=True,
+        d_lr=getattr(FLAGES, 'd_lr', None),
+        lambda_hp=getattr(FLAGES, 'lambda_hp', 5.0),
+        lambda_spec=getattr(FLAGES, 'lambda_spec', 1.0),
+        lambda_adv_spatial=getattr(FLAGES, 'lambda_adv_spatial', 1.0),
+        lambda_adv_spectrum=getattr(FLAGES, 'lambda_adv_spectrum', 1.0),
+        adv_warmup_iters=getattr(FLAGES, 'adv_warmup_iters', 2000),
+        adv_ramp_iters=getattr(FLAGES, 'adv_ramp_iters', 8000),
+        adv_weight_max=getattr(FLAGES, 'adv_weight_max', 1.0),
+        residual_scale=getattr(FLAGES, 'residual_scale', 0.1),
+        beta1=getattr(FLAGES, 'beta1', 0.5),
+        beta2=getattr(FLAGES, 'beta2', 0.999),
+        grad_clip_norm=getattr(FLAGES, 'grad_clip_norm', 5.0),
+    )
     model.train()
     dataset=DataSet(FLAGES.pan_size, FLAGES.ms_size, FLAGES.img_path, FLAGES.data_path, FLAGES.batch_size,
                     FLAGES.stride)
@@ -306,6 +327,5 @@ def main(argv):
 
 if __name__ == '__main__':
     tf.app.run()
-
 
 

@@ -24,6 +24,21 @@ tf.app.flags.DEFINE_string('result_path', './result', 'Output folder')
 # Folder names under test_path (keep same as original repo by default)
 tf.app.flags.DEFINE_string('ms_dir', 'lrms', 'Subfolder for MS images (TIFF)')
 tf.app.flags.DEFINE_string('pan_dir', 'pan', 'Subfolder for PAN images (TIFF)')
+tf.app.flags.DEFINE_string(
+    'pan_name_replace',
+    '_mul,_pan',
+    'Map MS filename to PAN filename via "from,to" replacement. Empty to keep same name.',
+)
+tf.app.flags.DEFINE_string(
+    'input_layout',
+    'auto',
+    'Input layout for TIFF arrays: auto, hwc, or chw.',
+)
+tf.app.flags.DEFINE_string(
+    'output_layout',
+    'hwc',
+    'Output layout before saving: auto, hwc, or chw.',
+)
 
 # Save dtype
 # - If True: save output as uint16 when input MS is uint16; otherwise uint8
@@ -34,6 +49,18 @@ tf.app.flags.DEFINE_boolean('save_like_input_dtype', True, 'Save output dtype sa
 
 def _ensure_hwc(arr: np.ndarray) -> np.ndarray:
     """Ensure TIFF array is HWC."""
+    layout = FLAGS.input_layout.lower()
+    if layout == 'hwc':
+        return arr
+    if layout == 'chw':
+        if arr.ndim == 2:
+            return arr[:, :, None]
+        if arr.ndim != 3:
+            raise ValueError(f"Unsupported TIFF shape: {arr.shape}")
+        return np.transpose(arr, (1, 2, 0))
+    if layout != 'auto':
+        raise ValueError('input_layout must be one of: auto, hwc, chw')
+
     if arr.ndim == 2:
         return arr[:, :, None]
     if arr.ndim != 3:
@@ -45,19 +72,62 @@ def _ensure_hwc(arr: np.ndarray) -> np.ndarray:
     return arr
 
 
-def _normalize_to_minus1_1(img: np.ndarray) -> np.ndarray:
-    if np.issubdtype(img.dtype, np.integer):
-        info = np.iinfo(img.dtype)
-        maxv = float(info.max)
-        mid = maxv / 2.0
-        return (img.astype(np.float32) - mid) / mid
-
+def _robust_percentile_normalize_to_minus1_1(img: np.ndarray, p_low=0.2, p_high=99.8) -> np.ndarray:
+    """Match training normalization: per-channel percentile scaling to [-1, 1]."""
     img_f = img.astype(np.float32)
-    vmin = float(np.nanmin(img_f))
-    vmax = float(np.nanmax(img_f))
-    if vmin >= 0.0 and vmax <= 1.0:
-        return img_f * 2.0 - 1.0
-    return img_f
+
+    # special case: [0,1] floats
+    if np.issubdtype(img.dtype, np.floating):
+        vmin = float(np.nanmin(img_f))
+        vmax = float(np.nanmax(img_f))
+        if vmin >= 0.0 and vmax <= 1.0:
+            return img_f * 2.0 - 1.0
+
+    if img_f.ndim == 2:
+        img_f = img_f[:, :, None]
+
+    out = np.empty_like(img_f, dtype=np.float32)
+    for c in range(img_f.shape[2]):
+        ch = img_f[:, :, c]
+        lo = np.nanpercentile(ch, p_low)
+        hi = np.nanpercentile(ch, p_high)
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo + 1e-6:
+            lo = float(np.nanmin(ch))
+            hi = float(np.nanmax(ch))
+            if hi <= lo + 1e-6:
+                out[:, :, c] = 0.0
+                continue
+        ch_n = (ch - lo) / (hi - lo)
+        ch_n = np.clip(ch_n, 0.0, 1.0)
+        out[:, :, c] = ch_n * 2.0 - 1.0
+
+    return out
+
+
+def _ensure_output_hwc(arr: np.ndarray) -> np.ndarray:
+    layout = FLAGS.output_layout.lower()
+    if layout == 'hwc':
+        if arr.ndim == 3:
+            c = int(getattr(FLAGS, 'num_spectrum', 0))
+            if c > 0:
+                if arr.shape[0] == c and arr.shape[2] != c:
+                    return np.transpose(arr, (1, 2, 0))
+                if arr.shape[1] == c and arr.shape[2] != c:
+                    return np.transpose(arr, (0, 2, 1))
+        return arr
+    if layout == 'chw':
+        if arr.ndim != 3:
+            raise ValueError(f"Unsupported output shape: {arr.shape}")
+        return np.transpose(arr, (1, 2, 0))
+    if layout != 'auto':
+        raise ValueError('output_layout must be one of: auto, hwc, chw')
+
+    if arr.ndim != 3:
+        return arr
+    c_first, h, w = arr.shape
+    if c_first <= 32 and c_first < h and c_first < w:
+        return np.transpose(arr, (1, 2, 0))
+    return arr
 
 
 def _denormalize_from_minus1_1(img: np.ndarray, out_dtype: np.dtype) -> np.ndarray:
@@ -71,9 +141,20 @@ def _denormalize_from_minus1_1(img: np.ndarray, out_dtype: np.dtype) -> np.ndarr
     return img.astype(out_dtype)
 
 
+def _map_pan_name(ms_name: str) -> str:
+    if not FLAGS.pan_name_replace:
+        return ms_name
+    parts = [p.strip() for p in FLAGS.pan_name_replace.split(',', 1)]
+    if len(parts) != 2:
+        raise ValueError('pan_name_replace must be "from,to" or empty.')
+    src, dst = parts
+    return ms_name.replace(src, dst, 1) if src else ms_name
+
+
 def read_pair(pan_folder: str, ms_folder: str, fname: str, ratio: int):
     """Read a PAN/MS pair, normalize to [-1,1], and return NCHW ready for model."""
-    pan_path = os.path.join(pan_folder, fname)
+    pan_name = _map_pan_name(fname)
+    pan_path = os.path.join(pan_folder, pan_name)
     ms_path = os.path.join(ms_folder, fname)
 
     pan_raw = _ensure_hwc(tifffile.imread(pan_path))
@@ -85,8 +166,8 @@ def read_pair(pan_folder: str, ms_folder: str, fname: str, ratio: int):
 
     ms_dtype = ms_raw.dtype
 
-    pan = _normalize_to_minus1_1(pan_raw)
-    ms = _normalize_to_minus1_1(ms_raw)
+    pan = _robust_percentile_normalize_to_minus1_1(pan_raw)
+    ms = _robust_percentile_normalize_to_minus1_1(ms_raw)
 
     # If MS is still lower-res, upsample to PAN size for inference.
     if ms.shape[0] != pan.shape[0] or ms.shape[1] != pan.shape[1]:
@@ -118,7 +199,9 @@ def main(_):
         is_training=False,
     )
 
-    saver = tf.train.Saver()
+    saver = tf.train.Saver(
+        var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, 'Pan_model')
+    )
 
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
@@ -127,9 +210,14 @@ def main(_):
         ms_folder = os.path.join(FLAGS.test_path, FLAGS.ms_dir)
         pan_folder = os.path.join(FLAGS.test_path, FLAGS.pan_dir)
 
-        fnames = sorted([f for f in os.listdir(ms_folder) if f.lower().endswith(('.tif', '.tiff'))])
+        ms_files = {f for f in os.listdir(ms_folder) if f.lower().endswith(('.tif', '.tiff'))}
+        pan_files = {f for f in os.listdir(pan_folder) if f.lower().endswith(('.tif', '.tiff'))}
+        fnames = sorted([f for f in ms_files if _map_pan_name(f) in pan_files])
         if len(fnames) == 0:
-            raise FileNotFoundError(f"No .tif/.tiff files found in {ms_folder}")
+            raise FileNotFoundError(
+                f"No matching .tif/.tiff filenames between {ms_folder} and {pan_folder} "
+                f"using pan_name_replace={FLAGS.pan_name_replace!r}"
+            )
 
         for fname in fnames:
             print(fname)
@@ -142,7 +230,7 @@ def main(_):
                 feed_dict={model.pan_img: pan, model.ms_img: ms},
             )
 
-            out = out.squeeze()  # (H,W,C)
+            out = _ensure_output_hwc(out.squeeze())  # (H,W,C)
 
             # Decide output dtype
             if FLAGS.save_like_input_dtype:
